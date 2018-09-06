@@ -1,0 +1,7 @@
+env/
+weights_*/
+
+.ipynb_checkpoints/
+
+*.json
+
