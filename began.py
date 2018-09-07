@@ -55,7 +55,7 @@ class Decoder(nn.Module):
             nn.ELU(),
             nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(hidden_size, 3, 3, 1, 1),
+            nn.Conv2d(hidden_size, num_channels, 3, 1, 1),
             nn.Tanh()
         )
 
@@ -73,7 +73,7 @@ class Encoder(nn.Module):
     def __init__(self, num_channels, hidden_size, noise_size, image_size):
         super(Encoder, self).__init__()
         self.main = nn.Sequential(
-            nn.Conv2d(3, hidden_size, 3, 1, 1),
+            nn.Conv2d(num_channels, hidden_size, 3, 1, 1),
             nn.ELU(),
 
             nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
