@@ -37,25 +37,25 @@ class Decoder(nn.Module):
         self.multiplier = image_size // 4
         self.fc = nn.Linear(noise_size, hidden_size * self.multiplier**2)
         self.first_layer = nn.Sequential(
-            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Upsample(scale_factor=2)
+            nn.UpsamplingNearest2d(scale_factor=2)
         )
         self.second_layer = nn.Sequential(
-            nn.Conv2d(2*hidden_size, hidden_size, 3),
+            nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Upsample(scale_factor=2)
+            nn.UpsamplingNearest2d(scale_factor=2)
         )
         self.third_layer = nn.Sequential(
-            nn.Conv2d(2*hidden_size, hidden_size, 3),
+            nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(hidden_size, 3, 3),
+            nn.Conv2d(hidden_size, 3, 3, 1, 1),
             nn.Tanh()
         )
 
@@ -73,33 +73,32 @@ class Encoder(nn.Module):
     def __init__(self, num_channels, hidden_size, noise_size, image_size):
         super(Encoder, self).__init__()
         self.main = nn.Sequential(
-            nn.Conv2d(3, hidden_size, 3),
+            nn.Conv2d(3, hidden_size, 3, 1, 1),
             nn.ELU(),
 
-            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.Conv2d(hidden_size, hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(hidden_size, 2*hidden_size, 3),
+            nn.Conv2d(hidden_size, 2*hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.MaxPool2d(3, stride=2),
+            nn.AvgPool2d(2, stride=2),
 
-            nn.Conv2d(2*hidden_size, 2*hidden_size, 3),
+            nn.Conv2d(2*hidden_size, 2*hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(2*hidden_size, 3*hidden_size, 3),
+            nn.Conv2d(2*hidden_size, 3*hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.MaxPool2d(3, stride=2),
+            nn.AvgPool2d(2, stride=2),
 
-            nn.Conv2d(3*hidden_size, 3*hidden_size, 3),
+            nn.Conv2d(3*hidden_size, 3*hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.Conv2d(3*hidden_size, 3*hidden_size, 3),
+            nn.Conv2d(3*hidden_size, 3*hidden_size, 3, 1, 1),
             nn.ELU(),
-            nn.MaxPool2d(3, stride=2)
         )
         multiplier = image_size // 4
         self.fc = nn.Linear(3*hidden_size * multiplier**2, noise_size)
 
     def forward(self, img):
         out = self.main(img)
-        out = out.view(out.shape(0), -1)
+        out = out.view((out.size(0), -1))
         out = self.fc(out)
         return out
 
