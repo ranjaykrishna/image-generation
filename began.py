@@ -29,78 +29,101 @@ def weights_init_normal(m):
         torch.nn.init.constant_(m.bias.data, 0.0)
 
 
-class Generator(nn.Module):
+class Decoder(nn.Module):
 
-    def __init__(self, nz, ngf, nc):
-        super(Generator, self).__init__()
-        self.init_size = ngf // 4
-        self.ngf = ngf
-        self.l1 = nn.Linear(nz, ngf * 2 * self.init_size**2)
-        self.conv_blocks = nn.Sequential(
-            nn.BatchNorm2d(ngf * 2),
-
-            # state size. (ngf * 2) x 8 x 8
-            nn.Upsample(scale_factor=2),
-
-            # state size. (ngf * 2) x 16 x 16
-            nn.Conv2d(ngf * 2, ngf * 2, 3, stride=1, padding=1),
-            nn.BatchNorm2d(ngf * 2, 0.8),
-            nn.LeakyReLU(0.2, inplace=True),
-
-            # state size. (ngf * 2) x 16 x 16
-            nn.Upsample(scale_factor=2),
-
-            # state size. (ngf * 2) x 32 x 32
-            nn.Conv2d(ngf * 2, ngf, 3, stride=1, padding=1),
-            nn.BatchNorm2d(ngf, 0.8),
-            nn.LeakyReLU(0.2, inplace=True),
-
-            # state size. (ngf) x 32 x 32
-            nn.Conv2d(ngf, nc, 3, stride=1, padding=1),
+    def __init__(self, num_channels, hidden_size, noise_size, image_size):
+        super(Decoder, self).__init__()
+        self.hidden_size = hidden_size
+        self.multiplier = image_size // 4
+        self.fc = nn.Linear(noise_size, hidden_size * self.multiplier**2)
+        self.first_layer = nn.Sequential(
+            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.ELU(),
+            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.ELU(),
+            nn.Upsample(scale_factor=2)
+        )
+        self.second_layer = nn.Sequential(
+            nn.Conv2d(2*hidden_size, hidden_size, 3),
+            nn.ELU(),
+            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.ELU(),
+            nn.Upsample(scale_factor=2)
+        )
+        self.third_layer = nn.Sequential(
+            nn.Conv2d(2*hidden_size, hidden_size, 3),
+            nn.ELU(),
+            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.ELU(),
+            nn.Conv2d(hidden_size, 3, 3),
             nn.Tanh()
-
-            # state size. (nc) x 64 x 64
         )
 
     def forward(self, noise):
-        out = self.l1(noise)
-        out = out.view(out.shape[0], self.ngf * 2, self.init_size, self.init_size)
-        img = self.conv_blocks(out)
-        return img
+        out = self.fc(noise)
+        out = out.view(out.shape[0], self.hidden_size, self.multiplier, self.multiplier)
+        out = self.first_layer(out)
+        out = self.second_layer(out)
+        out = self.third_layer(out)
+        return out
+
+
+class Encoder(nn.Module):
+
+    def __init__(self, num_channels, hidden_size, noise_size, image_size):
+        super(Encoder, self).__init__()
+        self.main = nn.Sequential(
+            nn.Conv2d(3, hidden_size, 3),
+            nn.ELU(),
+
+            nn.Conv2d(hidden_size, hidden_size, 3),
+            nn.ELU(),
+            nn.Conv2d(hidden_size, 2*hidden_size, 3),
+            nn.ELU(),
+            nn.MaxPool2d(3, stride=2),
+
+            nn.Conv2d(2*hidden_size, 2*hidden_size, 3),
+            nn.ELU(),
+            nn.Conv2d(2*hidden_size, 3*hidden_size, 3),
+            nn.ELU(),
+            nn.MaxPool2d(3, stride=2),
+
+            nn.Conv2d(3*hidden_size, 3*hidden_size, 3),
+            nn.ELU(),
+            nn.Conv2d(3*hidden_size, 3*hidden_size, 3),
+            nn.ELU(),
+            nn.MaxPool2d(3, stride=2)
+        )
+        multiplier = image_size // 4
+        self.fc = nn.Linear(3*hidden_size * multiplier**2, noise_size)
+
+    def forward(self, img):
+        out = self.main(img)
+        out = out.view(out.shape(0), -1)
+        out = self.fc(out)
+        return out
+
+
+class Generator(nn.Module):
+
+    def __init__(self, num_channels, hidden_size, noise_size, image_size):
+        super(Generator, self).__init__()
+        self.decoder = Decoder(num_channels, hidden_size, noise_size, image_size)
+
+    def forward(self, noise):
+        return self.decoder(noise)
 
 
 class Discriminator(nn.Module):
 
-    def __init__(self, nc, ndf):
+    def __init__(self, num_channels, hidden_size, noise_size, image_size):
         super(Discriminator, self).__init__()
+        self.encoder = Encoder(num_channels, hidden_size, noise_size, image_size)
+        self.decoder = Decoder(num_channels, hidden_size, noise_size, image_size)
 
-        # Upsampling
-        self.down = nn.Sequential(
-            nn.Conv2d(nc, ndf, 3, 2, 1),
-            nn.ReLU(),
-        )
-        # Fully-connected layers
-        self.down_size = (ndf // 2)
-        self.ndf = ndf
-        down_dim = ndf * (ndf // 2)**2
-        self.fc = nn.Sequential(
-            nn.Linear(down_dim, ndf // 2),
-            nn.BatchNorm1d(ndf // 2, 0.8),
-            nn.ReLU(inplace=True),
-            nn.Linear(ndf // 2, down_dim),
-            nn.BatchNorm1d(down_dim),
-            nn.ReLU(inplace=True)
-        )
-        # Upsampling
-        self.up = nn.Sequential(
-            nn.Upsample(scale_factor=2),
-            nn.Conv2d(ndf, nc, 3, 1, 1)
-        )
-
-    def forward(self, img):
-        out = self.down(img)
-        out = self.fc(out.view(out.size(0), -1))
-        out = self.up(out.view(out.size(0), self.ndf, self.down_size, self.down_size))
+    def forward(self, image):
+        out = self.encoder(image)
+        out = self.decoder(out)
         return out
 
 
@@ -114,10 +137,9 @@ if __name__=='__main__':
     parser.add_argument('--b1', type=float, default=0.5, help='adam: decay of first order momentum of gradient')
     parser.add_argument('--b2', type=float, default=0.999, help='adam: decay of first order momentum of gradient')
     parser.add_argument('--workers', type=int, default=8, help='number of cpu threads to use during batch generation')
-    parser.add_argument('--nz', type=int, default=62, help='size of the latent z vector')
-    parser.add_argument('--image-size', type=int, default=64, help='the height / width of the input image to network')
-    parser.add_argument('--ngf', type=int, default=64)
-    parser.add_argument('--ndf', type=int, default=64)
+    parser.add_argument('--image-size', type=int, default=32, help='the height / width of the input image to network')
+    parser.add_argument('--noise-size', type=int, default=64, help='the height / width of the input image to network')
+    parser.add_argument('--hidden-size', type=int, default=64, help='the height / width of the input image to network')
     parser.add_argument('--sample-interval', type=int, default=400, help='number of image channels')
     parser.add_argument('--generator', default=None, help="path to generator (to continue training)")
     parser.add_argument('--discriminator', default=None, help="path to discriminator (to continue training)")
@@ -142,7 +164,7 @@ if __name__=='__main__':
 
     # Housekeeping.
     cuda = True if torch.cuda.is_available() else False
-    nc = 3
+    num_channels = 3
 
     # Create dataset.
     if args.dataset == 'cifar10':
@@ -159,7 +181,7 @@ if __name__=='__main__':
                                    transforms.ToTensor(),
                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                                ]))
-        nc = 1
+        num_channels = 1
     elif args.dataset == 'folder':
         dataset = dset.ImageFolder(root=args.dataroot,
                                    transform=transforms.Compose([
@@ -173,7 +195,7 @@ if __name__=='__main__':
 					     shuffle=True, num_workers=args.workers)
 
     # Initialize generator.
-    generator = Generator(args.nz, args.ngf, nc)
+    generator = Generator(num_channels, args.hidden_size, args.noise_size, args.image_size)
     generator.apply(weights_init_normal)
     if args.generator is not None:
         generator.load_state_dict(torch.load(args.generator))
@@ -182,7 +204,7 @@ if __name__=='__main__':
     logging.info(generator)
 
     # Initialize discriminator.
-    discriminator = Discriminator(nc, args.ndf)
+    discriminator = Discriminator(num_channels, args.hidden_size, args.noise_size, args.image_size)
     discriminator.apply(weights_init_normal)
     if args.discriminator is not None:
         discriminator.load_state_dict(torch.load(args.discriminator))
@@ -195,7 +217,7 @@ if __name__=='__main__':
     optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=args.lr, betas=(args.b1, args.b2))
 
     Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-    fixed_noise = Tensor(np.random.normal(0, 1, (args.batch_size, args.nz)))
+    fixed_noise = Tensor(np.random.normal(0, 1, (args.batch_size, args.noise_size)))
 
     # BEGAN hyper parameters
     gamma = 0.75
@@ -215,7 +237,7 @@ if __name__=='__main__':
             optimizer_G.zero_grad()
 
             # Sample noise as generator input
-            z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], args.nz))))
+            z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], args.noise_size))))
 
             # Generate a batch of images
             gen_imgs = generator(z)
