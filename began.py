@@ -72,6 +72,7 @@ class Encoder(nn.Module):
 
     def __init__(self, num_channels, hidden_size, noise_size, image_size):
         super(Encoder, self).__init__()
+        self.hidden_size = hidden_size
         self.main = nn.Sequential(
             nn.Conv2d(num_channels, hidden_size, 3, 1, 1),
             nn.ELU(),
@@ -94,11 +95,12 @@ class Encoder(nn.Module):
             nn.ELU(),
         )
         multiplier = image_size // 4
+        self.multiplier = multiplier
         self.fc = nn.Linear(3*hidden_size * multiplier**2, noise_size)
 
     def forward(self, img):
         out = self.main(img)
-        out = out.view((out.size(0), -1))
+        out = out.view((out.size(0), 3*self.hidden_size * self.multiplier**2))
         out = self.fc(out)
         return out
 
@@ -129,7 +131,7 @@ class Discriminator(nn.Module):
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', required=True, help='cifar10 | folder | mnist')
-    parser.add_argument('--dataroot', default='downloads/madhubani/', help='Path to dataset.')
+    parser.add_argument('--dataroot', default='../datasets/celebA/', help='Path to dataset.')
     parser.add_argument('--n-epochs', type=int, default=200, help='number of epochs of training')
     parser.add_argument('--batch-size', type=int, default=128, help='size of the batches')
     parser.add_argument('--lr', type=float, default=0.0002, help='adam: learning rate')
@@ -166,29 +168,22 @@ if __name__=='__main__':
     num_channels = 3
 
     # Create dataset.
+    transform = transforms.Compose([transforms.Resize(args.image_size),
+                                    transforms.CenterCrop(args.image_size),
+                                    transforms.ToTensor(),
+                                    transforms.Lambda(lambda x: x.mul_(2).add_(-1))
+                                    #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                                   ])
     if args.dataset == 'cifar10':
         dataset = dset.CIFAR10(root=args.dataroot, download=True,
-                               transform=transforms.Compose([
-                                   transforms.Resize(args.image_size),
-                                   transforms.ToTensor(),
-                                   transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                               ]))
+                               transform=transform)
     elif args.dataset == 'mnist':
         dataset = dset.MNIST(root=args.dataroot, download=True,
-                             transform=transforms.Compose([
-                                   transforms.Resize(args.image_size),
-                                   transforms.ToTensor(),
-                                   transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                               ]))
+                             transform=transform)
         num_channels = 1
     elif args.dataset == 'folder':
         dataset = dset.ImageFolder(root=args.dataroot,
-                                   transform=transforms.Compose([
-                                       transforms.Resize(args.image_size),
-                                       transforms.CenterCrop(args.image_size),
-                                       transforms.ToTensor(),
-                                       transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                                   ]))
+                                   transform=transform)
     assert dataset
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size,
 					     shuffle=True, num_workers=args.workers)
@@ -224,7 +219,7 @@ if __name__=='__main__':
     k = 0.
 
     for epoch in range(args.n_epochs):
-        for i, (imgs, _) in enumerate(dataloader):
+        for iteration, (imgs, _) in enumerate(dataloader):
 
             # Configure input
             real_imgs = Variable(imgs.type(Tensor))
@@ -282,13 +277,19 @@ if __name__=='__main__':
             #--------------
 
             logging.info("Epoch: [%d/%d], Iteration: [%d/%d], Loss_D: %.4f, Loss_G: %.4f, M: %f, k: %f" % (
-                epoch, args.n_epochs, i, len(dataloader), d_loss.item(), g_loss.item(), M, k))
+                epoch, args.n_epochs, iteration, len(dataloader), d_loss.item(), g_loss.item(), M, k))
 
-            if i % 100 == 0:
+            if iteration % 100 == 0:
                 fake = generator(fixed_noise)
-                vutils.save_image(fake.detach(),
-                        '%s/fake_samples_epoch_%03d.png' % (args.outf, epoch),
-                        normalize=True)
+                vutils.save_image(fake.data,
+                                  '%s/fake_samples_iteration_%03d_%05d.png' % (args.outf, epoch, iteration),
+                                  normalize=True)
+                vutils.save_image(real_imgs.data,
+                                  '%s/real_samples_iteration_%03d_%05d.png' % (args.outf, epoch, iteration),
+                                  normalize=True)
+                vutils.save_image(d_real.data,
+                                  '%s/real_recons_samples_iteration_%03d_%05d.png' % (args.outf, epoch, iteration),
+                                  normalize=True)
 
         # do checkpointing
         torch.save(generator.state_dict(), '%s/netG_epoch_%d.pth' % (args.outf, epoch))
